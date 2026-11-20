@@ -12,6 +12,7 @@ import type {
   Channel,
   PublicUser,
   Reaction,
+  SpectatorInfo,
   ThreadSummary,
   User,
 } from "./api";
@@ -45,6 +46,7 @@ export type ServerEvent =
   | { type: "key.updated"; user_id: number; public_key: string }
   | { type: "poll.updated"; channel_id: number; message_id: number; poll: Poll }
   | { type: "game.updated"; channel_id: number; message_id: number; game: GameView }
+  | { type: "game.spectators"; channel_id: number; message_id: number; count: number; spectators: SpectatorInfo[] }
   | { type: "game.map"; message_id: number; map: StationMap }
   | { type: "game.frame"; message_id: number; frame: StFrame }
   | { type: "reminder.due"; reminder: Reminder }
@@ -52,7 +54,7 @@ export type ServerEvent =
   | { type: "call.accepted"; call_id: string }
   | { type: "call.signal"; call_id: string; data: { sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit } }
   | { type: "call.ended"; call_id: string; reason: string }
-  | { type: "typing"; channel_id: number; user_id: number }
+  | { type: "typing"; channel_id: number; user_id: number; parent_id?: number }
   | { type: "presence"; user_id: number; online: boolean }
   | { type: "user.updated"; user: PublicUser }
   | { type: "channel.joined"; channel: Channel }
@@ -95,7 +97,8 @@ export type ClientRequest =
       reply_to_id?: number;
       forwarded?: boolean;
     }
-  | { type: "typing"; channel_id: number }
+  | { type: "game.spectate" | "game.unspectate"; message_id: number }
+  | { type: "typing"; channel_id: number; parent_id?: number }
   | { type: "read"; channel_id: number; message_id: number }
   | { type: "ping" };
 
@@ -262,8 +265,16 @@ export class ChatSocket {
     return this.status === "open" && this.rawSend(req as unknown as ClientRequest);
   }
 
-  sendTyping(channelId: number) {
-    if (this.status === "open") this.rawSend({ type: "typing", channel_id: channelId });
+  sendTyping(channelId: number, parentId?: number) {
+    if (this.status === "open") this.rawSend({ type: "typing", channel_id: channelId, parent_id: parentId });
+  }
+
+  spectateGame(messageId: number) {
+    if (this.status === "open") this.rawSend({ type: "game.spectate", message_id: messageId });
+  }
+
+  unspectateGame(messageId: number) {
+    if (this.status === "open") this.rawSend({ type: "game.unspectate", message_id: messageId });
   }
 
   markRead(channelId: number, messageId: number) {

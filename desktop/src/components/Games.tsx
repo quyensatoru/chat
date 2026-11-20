@@ -2187,7 +2187,9 @@ export function GameLeaderboardDialog({
                         />
                         <div className="lb-user-info">
                           <span className="lb-name">{m.display_name || m.username}</span>
-                          <span className="lb-sub">Tỉ lệ thắng: {m.win_rate}%</span>
+                          <span className="lb-sub">
+                            {m.tier_badge || "🥈"} {m.rating ?? 1200} Elo · Thắng: {m.win_rate}%
+                          </span>
                         </div>
                         <div className="lb-stat-badge win-badge">
                           <b>{m.wins}</b> thắng
@@ -2248,6 +2250,7 @@ export function GameLeaderboardDialog({
                     <tr>
                       <th style={{ width: "3.5rem" }}>Hạng</th>
                       <th>Thành viên</th>
+                      <th style={{ textAlign: "center" }}>Cấp Bậc & Elo</th>
                       <th style={{ textAlign: "center" }}>Tổng ván</th>
                       <th style={{ textAlign: "center" }}>Thắng</th>
                       <th style={{ textAlign: "center" }}>Thua</th>
@@ -2277,6 +2280,13 @@ export function GameLeaderboardDialog({
                             <span className="lb-td-name">{m.display_name || m.username}</span>
                             {m.username && <span className="lb-td-handle">@{m.username}</span>}
                           </div>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <span className="lb-elo-badge" title={`Đỉnh cao: ${m.peak_rating || m.rating || 1200} Elo`}>
+                            <span className="lb-tier-icon">{m.tier_badge || "🥈"}</span>
+                            <b>{m.rating ?? 1200}</b>
+                            <span className="lb-tier-name">{m.rank_tier || "Bạc"}</span>
+                          </span>
                         </td>
                         <td style={{ textAlign: "center" }}>
                           <b>{m.total_games}</b>

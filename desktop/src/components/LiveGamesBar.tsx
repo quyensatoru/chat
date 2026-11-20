@@ -116,6 +116,11 @@ export function LiveGamesBar({ channelId }: { channelId: number }) {
                 <div className="live-game-meta">
                   <span className="live-game-players">{formatGamePlayers(g)}</span>
                   {g.is_my_turn && <span className="live-turn-badge">⚡ Lượt bạn!</span>}
+                  {g.viewer_count > 0 && (
+                    <span className="live-viewers-count" title={`${g.viewer_count} người đang xem trực tiếp`}>
+                      👁️ {g.viewer_count}
+                    </span>
+                  )}
                 </div>
               </div>
               <span className="live-jump-indicator" aria-hidden>

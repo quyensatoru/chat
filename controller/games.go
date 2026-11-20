@@ -30,9 +30,11 @@ type gameSession struct {
 	channelID int64
 	g         *game.Game
 	deleted   bool
+	rated     bool // Đã tính biến thiên điểm Elo khi ván kết thúc chưa
 	// Trò thời gian thực: vòng lặp đang chạy, và các kết nối đang mở màn hình chơi (nhận frame).
-	running  bool
-	watchers map[*socket.Client]bool
+	running    bool
+	watchers   map[*socket.Client]bool
+	spectators map[*socket.Client]SpectatorInfo
 }
 
 type gameRegistry struct {
@@ -110,6 +112,31 @@ func (a *API) saveAndBroadcast(ctx context.Context, s *gameSession) {
 	if err != nil {
 		log.Printf("save game %d: %v", s.messageID, err)
 	}
+
+	// Khi ván kết thúc (status == Ended) và là game đối kháng 2 người, tự động tính điểm Elo
+	if s.g.Status() == game.Ended && !s.rated {
+		s.rated = true
+		players := s.g.Players()
+		if game.IsSoloGame(s.g.Kind()) && len(players) == 2 {
+			pA, pB := players[0], players[1]
+			if pA.ID != pB.ID {
+				winners := s.g.Winners()
+				scoreA := 0.5
+				if len(winners) > 0 {
+					if winners[0] == pA.ID {
+						scoreA = 1.0
+					} else if winners[0] == pB.ID {
+						scoreA = 0.0
+					}
+				}
+				go func(kind string, idA, idB int64, scA float64) {
+					if _, _, err := a.store.RecordSoloGameResult(context.Background(), kind, idA, idB, scA); err != nil {
+						log.Printf("record elo game %s (%d vs %d): %v", kind, idA, idB, err)
+					}
+				}(s.g.Kind(), pA.ID, pB.ID, scoreA)
+			}
+		}
+	}
 	a.hub.ToChannel(s.channelID, mustJSON(gameUpdatedEvent{
 		Type: "game.updated", ChannelID: s.channelID, MessageID: s.messageID, Game: viewJSON(s.g, 0),
 	}), nil)
@@ -117,6 +144,64 @@ func (a *API) saveAndBroadcast(ctx context.Context, s *gameSession) {
 		a.hub.ToUser(p.ID, mustJSON(gameUpdatedEvent{
 			Type: "game.updated", ChannelID: s.channelID, MessageID: s.messageID, Game: viewJSON(s.g, p.ID),
 		}))
+	}
+}
+
+// getSpectatorsList trả về danh sách khán giả độc nhất (theo userID) đang xem ván đấu.
+// Gọi khi đang giữ s.mu.
+func (s *gameSession) getSpectatorsList() []SpectatorInfo {
+	if len(s.spectators) == 0 {
+		return []SpectatorInfo{}
+	}
+	seen := make(map[int64]bool, len(s.spectators))
+	list := make([]SpectatorInfo, 0, len(s.spectators))
+	for _, spec := range s.spectators {
+		if !seen[spec.UserID] {
+			seen[spec.UserID] = true
+			list = append(list, spec)
+		}
+	}
+	return list
+}
+
+// broadcastSpectators gửi thông tin số lượng và danh sách khán giả đến cả kênh.
+// Gọi khi đang giữ s.mu.
+func (a *API) broadcastSpectators(s *gameSession) {
+	list := s.getSpectatorsList()
+	a.hub.ToChannel(s.channelID, mustJSON(gameSpectatorsEvent{
+		Type:       "game.spectators",
+		MessageID:  s.messageID,
+		ChannelID:  s.channelID,
+		Count:      len(list),
+		Spectators: list,
+	}), nil)
+}
+
+// spectatorClientGone dọn dẹp các phòng khán giả và watchers khi một kết nối socket bị ngắt.
+func (a *API) spectatorClientGone(client *socket.Client) {
+	a.games.mu.Lock()
+	sessions := make([]*gameSession, 0, len(a.games.sessions))
+	for _, s := range a.games.sessions {
+		sessions = append(sessions, s)
+	}
+	a.games.mu.Unlock()
+
+	for _, s := range sessions {
+		s.mu.Lock()
+		changed := false
+		if s.spectators != nil {
+			if _, ok := s.spectators[client]; ok {
+				delete(s.spectators, client)
+				changed = true
+			}
+		}
+		if s.watchers != nil {
+			delete(s.watchers, client)
+		}
+		if changed {
+			a.broadcastSpectators(s)
+		}
+		s.mu.Unlock()
 	}
 }
 
@@ -195,7 +280,10 @@ func (a *API) listLiveGames(w http.ResponseWriter, r *http.Request) {
 		}
 		gView := sess.g.View(me.ID)
 		vJSON := viewJSON(sess.g, me.ID)
-		watchersCount := len(sess.watchers)
+		watchersCount := len(sess.getSpectatorsList())
+		if sess.g.Realtime() && len(sess.watchers) > watchersCount {
+			watchersCount = len(sess.watchers)
+		}
 		sess.mu.Unlock()
 
 		msg, err := a.store.GetMessage(r.Context(), row.MessageID)
@@ -555,16 +643,44 @@ func (a *API) handleGameSocket(ctx context.Context, client *socket.Client, user 
 	if err != nil {
 		return
 	}
-	if req.Type != "game.unwatch" && !a.hub.IsSubscribed(client, s.channelID) {
+	if req.Type != "game.unwatch" && req.Type != "game.unspectate" && !a.hub.IsSubscribed(client, s.channelID) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.deleted || !s.g.Realtime() || !s.g.IsPlayer(user.ID) {
+	if s.deleted {
 		return
 	}
+
 	switch req.Type {
+	case "game.spectate":
+		if s.spectators == nil {
+			s.spectators = map[*socket.Client]SpectatorInfo{}
+		}
+		dn := user.DisplayName
+		if dn == "" {
+			dn = user.Username
+		}
+		s.spectators[client] = SpectatorInfo{
+			UserID:      user.ID,
+			Username:    user.Username,
+			DisplayName: dn,
+			Avatar:      user.Avatar,
+		}
+		a.broadcastSpectators(s)
+
+	case "game.unspectate":
+		if s.spectators != nil {
+			if _, ok := s.spectators[client]; ok {
+				delete(s.spectators, client)
+				a.broadcastSpectators(s)
+			}
+		}
+
 	case "game.watch":
+		if !s.g.Realtime() || !s.g.IsPlayer(user.ID) {
+			return
+		}
 		if s.watchers == nil {
 			s.watchers = map[*socket.Client]bool{}
 		}
@@ -574,9 +690,16 @@ func (a *API) handleGameSocket(ctx context.Context, client *socket.Client, user 
 			a.hub.ToClient(client, mustJSON(gameFrameEvent{Type: "game.frame", MessageID: s.messageID, Frame: f}))
 		}
 		a.ensureLoop(s)
+
 	case "game.unwatch":
-		delete(s.watchers, client)
+		if s.watchers != nil {
+			delete(s.watchers, client)
+		}
+
 	case "game.pos":
+		if !s.g.Realtime() || !s.g.IsPlayer(user.ID) {
+			return
+		}
 		var d struct {
 			X float64 `json:"x"`
 			Y float64 `json:"y"`

@@ -215,7 +215,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const update = (v: string) => {
     setText(v);
-    if (v.trim()) notifyTyping(channel.id);
+    if (v.trim()) notifyTyping(channel.id, parentId);
   };
 
   const trimmed = text.trim();

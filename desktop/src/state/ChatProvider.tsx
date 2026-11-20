@@ -115,7 +115,9 @@ type ChatContextValue = {
   openDM: (userId: number) => Promise<void>;
   retryMessage: (clientId: string) => void;
   discardMessage: (clientId: string) => void;
-  notifyTyping: (channelId: number) => void;
+  notifyTyping: (channelId: number, parentId?: number) => void;
+  spectateGame: (messageId: number) => void;
+  unspectateGame: (messageId: number) => void;
   loadOlder: (channelId: number) => Promise<void>;
   loadMembers: (channelId: number) => Promise<void>;
   loadLiveGames: (channelId: number) => Promise<void>;
@@ -159,7 +161,7 @@ export function ChatProvider({ api, serverUrl, token, me, onLogout, onUnauthoriz
   const socketRef = useRef<ChatSocket | null>(null);
   const [calls, setCalls] = useState<CallController | null>(null);
   const [groupCalls, setGroupCalls] = useState<GroupCallController | null>(null);
-  const lastTypingSent = useRef<Record<number, number>>({});
+  const lastTypingSent = useRef<Record<string | number, number>>({});
 
   const isViewing = useCallback((channelId: number) => {
     return stateRef.current.activeId === channelId && document.hasFocus() && !document.hidden;
@@ -468,6 +470,15 @@ export function ChatProvider({ api, serverUrl, token, me, onLogout, onUnauthoriz
       }),
       sock.on("key.updated", (ev) => e2ee.onKeyUpdated(ev.user_id, ev.public_key)),
       sock.on("poll.updated", (ev) => dispatch({ type: "poll.set", messageId: ev.message_id, poll: ev.poll })),
+      sock.on("game.spectators", (ev) => {
+        dispatch({
+          type: "game.spectators",
+          channelId: ev.channel_id,
+          messageId: ev.message_id,
+          count: ev.count,
+          spectators: ev.spectators,
+        });
+      }),
       sock.on("game.map", (ev) => stationStore.onMap(ev.message_id, ev.map)),
       sock.on("game.frame", (ev) => stationStore.onFrame(ev.message_id, ev.frame)),
       sock.on("game.updated", (ev) => {
@@ -773,11 +784,20 @@ export function ChatProvider({ api, serverUrl, token, me, onLogout, onUnauthoriz
         dispatch({ type: "pending.remove", clientId });
       },
 
-      notifyTyping: (channelId) => {
+      notifyTyping: (channelId, parentId) => {
+        const key = parentId ? `${channelId}_${parentId}` : `${channelId}`;
         const now = Date.now();
-        if (now - (lastTypingSent.current[channelId] ?? 0) < TYPING_THROTTLE_MS) return;
-        lastTypingSent.current[channelId] = now;
-        socketRef.current?.sendTyping(channelId);
+        if (now - (lastTypingSent.current[key] ?? 0) < TYPING_THROTTLE_MS) return;
+        lastTypingSent.current[key] = now;
+        socketRef.current?.sendTyping(channelId, parentId);
+      },
+
+      spectateGame: (messageId) => {
+        socketRef.current?.spectateGame(messageId);
+      },
+
+      unspectateGame: (messageId) => {
+        socketRef.current?.unspectateGame(messageId);
       },
 
       loadOlder,

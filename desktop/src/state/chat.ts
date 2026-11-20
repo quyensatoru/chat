@@ -9,6 +9,7 @@ import type {
   PublicUser,
   ReadState,
   Reaction,
+  SpectatorInfo,
   ThreadSummary,
   User,
 } from "../lib/api";
@@ -92,6 +93,8 @@ export type ChatState = {
   reads: Record<number, Record<number, number>>;
   /** channelId -> danh sách các ván game đang hoạt động */
   liveGames: Record<number, LiveGameItem[]>;
+  /** messageId -> danh sách khán giả đang xem ván đấu */
+  spectators: Record<number, SpectatorInfo[]>;
 };
 
 export function initialState(me: User): ChatState {
@@ -119,6 +122,7 @@ export function initialState(me: User): ChatState {
     linkPrompt: null,
     reads: {},
     liveGames: {},
+    spectators: {},
   };
 }
 
@@ -168,6 +172,7 @@ export type Action =
   | { type: "liveGames.loaded"; channelId: number; games: LiveGameItem[] }
   | { type: "liveGames.upsert"; channelId: number; game: LiveGameItem }
   | { type: "liveGames.remove"; channelId: number; messageId: number }
+  | { type: "game.spectators"; channelId: number; messageId: number; count: number; spectators: SpectatorInfo[] }
   | { type: "link.prompt"; prompt: LinkPrompt | null }
   | { type: "reaction.toggleLocal"; messageId: number; emoji: string }
   | { type: "reads.set"; channelId: number; reads: ReadState[] }
@@ -649,6 +654,37 @@ export function reducer(s: ChatState, a: Action): ChatState {
           ...s.liveGames,
           [a.channelId]: nextList,
         },
+      };
+    }
+
+    case "game.spectators": {
+      const nextSpectators = {
+        ...s.spectators,
+        [a.messageId]: a.spectators,
+      };
+
+      let nextLiveGames = s.liveGames;
+      const list = s.liveGames[a.channelId];
+      if (list) {
+        const idx = list.findIndex((g) => g.message_id === a.messageId);
+        if (idx >= 0) {
+          const nextList = [...list];
+          nextList[idx] = {
+            ...nextList[idx],
+            viewer_count: a.count,
+            spectators: a.spectators,
+          };
+          nextLiveGames = {
+            ...s.liveGames,
+            [a.channelId]: nextList,
+          };
+        }
+      }
+
+      return {
+        ...s,
+        spectators: nextSpectators,
+        liveGames: nextLiveGames,
       };
     }
   }

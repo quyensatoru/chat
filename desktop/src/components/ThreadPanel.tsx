@@ -17,7 +17,7 @@ type Props = {
 
 /** Panel bên phải: tin gốc, các trả lời và ô trả lời. Trên điện thoại phủ toàn màn hình. */
 export function ThreadPanel({ channel, parentId, onClose }: Props) {
-  const { state, openThread, retryMessage, discardMessage, sendMessage } = useChat();
+  const { state, openThread, retryMessage, discardMessage, sendMessage, spectateGame, unspectateGame } = useChat();
   const thread = state.threads[parentId];
   const [viewing, setViewing] = useState<Attachment | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -27,6 +27,19 @@ export function ThreadPanel({ channel, parentId, onClose }: Props) {
   useEffect(() => {
     if (!state.threads[parentId]) openThread(parentId);
   }, [parentId, state.threads, openThread]);
+
+  const parent = thread?.parent;
+  const isGameThread = parent?.embed?.type === "game" || !!parent?.game;
+
+  // Khán giả theo dõi ván game khi mở thread
+  useEffect(() => {
+    if (isGameThread) {
+      spectateGame(parentId);
+      return () => {
+        unspectateGame(parentId);
+      };
+    }
+  }, [isGameThread, parentId, spectateGame, unspectateGame]);
 
   const pending = useMemo(() => state.pending.filter((p) => p.parentId === parentId), [state.pending, parentId]);
   const rows = useMemo(
@@ -40,12 +53,9 @@ export function ThreadPanel({ channel, parentId, onClose }: Props) {
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [rows.length]);
 
-  const parent = thread?.parent;
   const parentUser = parent ? (state.users[parent.user_id] ?? parent.user) : undefined;
   const replyCount = thread?.replies.length ?? 0;
   const where = channelLabel(channel, state.users, state.me.id);
-
-  const isGameThread = parent?.embed?.type === "game" || !!parent?.game;
   const game = parent?.game;
 
   const getRoleBadge = (userId: number) => {
@@ -79,16 +89,31 @@ export function ThreadPanel({ channel, parentId, onClose }: Props) {
     return <span className="game-role-badge is-viewer">👁️ Khán giả</span>;
   };
 
+  const spectators = state.spectators[parentId] ?? [];
+  const liveGame = state.liveGames[channel.id]?.find((g) => g.message_id === parentId);
+  const viewerCount = spectators.length || liveGame?.viewer_count || 0;
+  const spectatorNames = spectators.map((s) => s.display_name || s.username).join(", ");
+
   return (
     <aside className="thread-panel" aria-label="Luồng trả lời">
       <header className="thread-header">
         <div>
           <h3>{isGameThread ? `Khán đài: ${game?.title || parent?.embed?.title || "Trò chơi"}` : "Luồng"}</h3>
-          <p className="muted">
-            {isGameThread && game?.players && game.players.length >= 2
-              ? `${game.players[0].name} vs ${game.players[1].name}`
-              : where}
-          </p>
+          <div className="thread-header-sub">
+            <p className="muted">
+              {isGameThread && game?.players && game.players.length >= 2
+                ? `${game.players[0].name} vs ${game.players[1].name}`
+                : where}
+            </p>
+            {isGameThread && viewerCount > 0 && (
+              <span
+                className="thread-spectator-badge"
+                title={spectatorNames ? `Khán giả: ${spectatorNames}` : `${viewerCount} khán giả đang theo dõi`}
+              >
+                <span className="live-dot" /> 👁️ {viewerCount} người xem
+              </span>
+            )}
+          </div>
         </div>
         <button className="icon-btn" onClick={onClose} aria-label="Đóng luồng">
           <Icon name="x" />

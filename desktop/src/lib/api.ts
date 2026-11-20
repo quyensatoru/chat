@@ -84,11 +84,17 @@ export type GameMemberStats = {
   username: string;
   display_name: string;
   avatar: string | null;
+  rating?: number;
+  peak_rating?: number;
+  rank_tier?: string;
+  tier_badge?: string;
   wins: number;
   losses: number;
   draws: number;
   total_games: number;
   win_rate: number;
+  current_streak?: number;
+  best_streak?: number;
 };
 
 export type GameLeaderboard = {
@@ -97,6 +103,13 @@ export type GameLeaderboard = {
   top_losses: GameMemberStats[];
   members: GameMemberStats[];
   total_ended: number;
+};
+
+export type SpectatorInfo = {
+  user_id: number;
+  username: string;
+  display_name: string;
+  avatar?: string | null;
 };
 
 export type LiveGameItem = {
@@ -112,6 +125,7 @@ export type LiveGameItem = {
   is_my_turn: boolean;
   reply_count: number;
   viewer_count: number;
+  spectators?: SpectatorInfo[];
   game: GameView;
 };
 

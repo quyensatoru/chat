@@ -59,6 +59,22 @@ type typingEvent struct {
 	Type      string `json:"type"`
 	ChannelID int64  `json:"channel_id"`
 	UserID    int64  `json:"user_id"`
+	ParentID  int64  `json:"parent_id,omitempty"`
+}
+
+type SpectatorInfo struct {
+	UserID      int64   `json:"user_id"`
+	Username    string  `json:"username"`
+	DisplayName string  `json:"display_name"`
+	Avatar      *string `json:"avatar"`
+}
+
+type gameSpectatorsEvent struct {
+	Type       string          `json:"type"`
+	MessageID  int64           `json:"message_id"`
+	ChannelID  int64           `json:"channel_id"`
+	Count      int             `json:"count"`
+	Spectators []SpectatorInfo `json:"spectators"`
 }
 
 type presenceEvent struct {
